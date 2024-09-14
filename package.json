@@ -1,0 +1,16 @@
+{
+  "name": "emotion-detection",
+  "version": "1.0.0",
+  "description": "Real-time emotion detection using webcam and Node.js",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "download-models": "node download-models.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "@tensorflow/tfjs-node": "^3.9.0",
+    "face-api.js": "^0.22.2",
+    "canvas": "^2.8.0"
+  }
+}
