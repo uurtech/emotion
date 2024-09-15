@@ -1,9 +1,56 @@
 const video = document.getElementById('video');
-const overlay = document.getElementById('overlay');
-const overlayCtx = overlay.getContext('2d');
+const detectionCanvas = document.getElementById('detectionCanvas');
+const chartCanvas = document.getElementById('emotionChart');
 
-// Debug logging
 console.log('Script started');
+
+let emotionChart;
+const emotionCounts = {
+  angry: 0,
+  disgusted: 0,
+  fearful: 0,
+  happy: 0,
+  neutral: 0,
+  sad: 0,
+  surprised: 0
+};
+
+const modernColors = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+  '#98D8C8', '#F7DC6F', '#BB8FCE'
+];
+
+function initializeChart() {
+  emotionChart = new Chart(chartCanvas, {
+    type: 'radar',
+    data: {
+      labels: Object.keys(emotionCounts),
+      datasets: [{
+        label: 'Emotion Counts',
+        data: Object.values(emotionCounts),
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        borderColor: modernColors[0],
+        pointBackgroundColor: modernColors,
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: modernColors[0]
+      }]
+    },
+    options: {
+      scales: {
+        r: {
+          angleLines: { display: false },
+          suggestedMin: 0,
+          suggestedMax: 10,
+          ticks: { stepSize: 1 }
+        }
+      },
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+}
 
 Promise.all([
   faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
@@ -13,49 +60,70 @@ Promise.all([
 ]).then(startVideo).catch(err => console.error('Error loading models:', err));
 
 function startVideo() {
-  console.log('Starting video');
   navigator.mediaDevices.getUserMedia({ video: {} })
     .then(stream => {
-      console.log('Got media stream');
+      console.log('Webcam access granted');
       video.srcObject = stream;
       video.play();
     })
     .catch(err => console.error('Error accessing webcam:', err));
 }
 
-// Wait for video to be fully loaded before starting face detection
-video.addEventListener('loadeddata', () => {
-  console.log('Video data loaded');
-  const canvas = faceapi.createCanvasFromMedia(video);
-  document.body.append(canvas);
-  const displaySize = { width: video.width, height: video.height };
-  faceapi.matchDimensions(canvas, displaySize);
+function updateCanvasDimensions() {
+  const sidebarWidth = 300;
+  const aspectRatio = video.videoWidth / video.videoHeight;
+  const canvasHeight = Math.min(180, sidebarWidth / aspectRatio);
   
-  setInterval(async () => {
-    console.log('Detecting faces');
-    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions();
-    console.log('Detections:', detections);
-    const resizedDetections = faceapi.resizeResults(detections, displaySize);
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    faceapi.draw.drawDetections(canvas, resizedDetections);
-    faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
-    
-    // Draw emotions on face
-    resizedDetections.forEach(detection => {
-      const { expressions, detection: { box } } = detection;
-      const emotion = Object.entries(expressions).reduce((a, b) => a[1] > b[1] ? a : b)[0];
-      
-      const drawBox = new faceapi.draw.DrawBox(box, { label: emotion });
-      drawBox.draw(canvas);
-      
-      // Add text above the face
-      const ctx = canvas.getContext('2d');
-      ctx.font = '24px Arial';
-      ctx.fillStyle = 'red';
-      ctx.fillText(emotion, box.x, box.y - 10);
-    });
-  }, 100);
+  detectionCanvas.width = sidebarWidth - 40;
+  detectionCanvas.height = canvasHeight;
+  
+  chartCanvas.width = sidebarWidth - 40;
+  chartCanvas.height = canvasHeight;
+}
+
+video.addEventListener('loadedmetadata', () => {
+  console.log('Video metadata loaded');
+  updateCanvasDimensions();
+  initializeChart();
 });
 
-// Make sure video is visible
-video.style.display = 'block';
+video.addEventListener('play', () => {
+  console.log('Video playback started');
+  
+  const displaySize = { width: detectionCanvas.width, height: detectionCanvas.height };
+  faceapi.matchDimensions(detectionCanvas, displaySize);
+  
+  setInterval(async () => {
+    if (video.paused || video.ended || !video.videoWidth) return;
+
+    try {
+      const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions();
+      const resizedDetections = faceapi.resizeResults(detections, displaySize);
+      
+      const ctx = detectionCanvas.getContext('2d');
+      ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+      
+      faceapi.draw.drawDetections(detectionCanvas, resizedDetections);
+      faceapi.draw.drawFaceLandmarks(detectionCanvas, resizedDetections);
+      faceapi.draw.drawFaceExpressions(detectionCanvas, resizedDetections);
+      
+      if (resizedDetections.length > 0) {
+        const { expressions } = resizedDetections[0];
+        const emotion = Object.entries(expressions).reduce((a, b) => a[1] > b[1] ? a : b)[0];
+        
+        emotionCounts[emotion]++;
+        
+        if (emotionChart) {
+          emotionChart.data.datasets[0].data = Object.values(emotionCounts);
+          emotionChart.update();
+        }
+        
+        console.log('Detected emotion:', emotion);
+      }
+    } catch (error) {
+      console.error('Error during face detection:', error);
+    }
+  }, 500);
+});
+
+window.addEventListener('resize', updateCanvasDimensions);
